@@ -1,0 +1,36 @@
+<launch>
+  <!-- 
+    Initial position arguments
+  -->
+  <arg name="x" default="-3.0"/>
+  <arg name="y" default="-3.0"/>
+  <arg name="z" default="0.0"/>
+  
+  <!-- Gazebo Simulation -->
+  <!-- <include file="$(find ur_gazebo)/launch/ur5.launch"/> -->
+  <!-- <include file="$(find ur_gazebo)/launch/ur5_bringup.launch"/> -->
+  <!-- <include file="$(find ur_gazebo)/launch/ur5e_bringup.launch"/> -->
+
+  <!-- Motion Planning -->
+  <!-- <include file="$(find ur5_moveit_config)/launch/ur5_moveit_planning_execution.launch">
+    <arg name="sim" value="true"/>
+  </include> -->
+
+  <include file="$(find ur5e_moveit_config)/launch/ur5e_moveit_planning_execution.launch">
+    <arg name="sim" value="true"/>
+  </include>
+
+
+  <!-- Rviz configured -->
+  <!-- <include file="$(find ur5e_moveit_config)/launch/moveit_rviz.launch"> -->
+  <!-- <include file="$(find ur5_moveit_config)/launch/moveit_rviz.launch"> -->
+    <!-- <arg name="config" value="true"/> -->
+  <!-- </include> -->
+
+  <!-- Fake AR Publisher -->
+  <!-- <node pkg="ur5_moveit_perception" type="fake_ar_publisher_node" name="fake_ar_publisher_node" required="true"/>   -->
+
+  <!-- Path Planner -->
+  <node pkg="tntp_implementation" type="tntp_implementation" name="ur5_optimal_tntp_planner" output = "screen" required="true"/>  
+
+</launch>
