@@ -1,13 +1,14 @@
 #pragma once
 
-
 #include <boost/graph/adjacency_list.hpp>
+#include <boost/graph/dijkstra_shortest_paths.hpp>
 #include <iterator>
 #include <utility>
 #include <algorithm>
 #include <vector>
+#include <angles/angles.h>
 
-#include "ur5_moveit_perception/definitions.h"
+#include "definitions.h"
 
 namespace optimal_tntp_algorithm
 {
@@ -16,8 +17,6 @@ void defineStates(std::vector<TaskSpaceWaypoint>& TSpoints,
     double epsilon_cont, 
     std::vector<ContinuousTrackingMotion>& continuous_set);
 
-
-
 struct OptimalTNTPSolver
 {
 public: 
@@ -25,8 +24,7 @@ public:
         std::vector<ContinuousTrackingMotion>* CTM, 
         optimal_tntp::PRMstar* our_prmstar);
 
-    void findInitialGuess(std::vector<optimal_tntp::RobotState>& resultant_tntp_motion_initial_guess, 
-    	std::vector<int>& topo_motion_initial_guess);
+    void eliminateRMs(int prev_CTM_index, int next_CTM_index);
 
     void showDetails()
     {
@@ -56,39 +54,28 @@ public:
 
     }
 
-
-    void addRMMotion(int source_color, int target_color, const std::vector<optimal_tntp::RobotState>& result_temp);
+    void reportSolutionInSpecificTopology(const std::vector<int>& topo, std::vector<optimal_tntp::RobotState>& path_in_specific_topology, int last_TSpoint_index, int& first_CTM_end_index);
 
     void updateAllRMs();
 
-    void reportSolutionInSpecificTopology(const std::vector<int>& topo, std::vector<optimal_tntp::RobotState>& path_in_specific_topology);
 
 private: 
 
-    int current_CTM_;
     std::vector<int> goal_CTMs_;
 
-    void createInitialGuess();
+    void initGraphStructure();
 
-    void getOnePath(int fromId, std::vector<int> toId, std::vector<boost::graph_traits<
-        boost::adjacency_list < boost::listS, boost::vecS, boost::undirectedS, 
-            boost::no_property, boost::property < boost::edge_weight_t, unsigned long > > >::vertex_descriptor>& vPredecessor, 
-        std::vector<int>& result);
     
-    bool getPath(int fromId, int toId, std::vector<boost::graph_traits<
-	boost::adjacency_list < boost::listS, boost::vecS, boost::undirectedS, 
-		boost::no_property, boost::property < boost::edge_weight_t, unsigned long > > >::vertex_descriptor>& vPredecessor, 
-	std::vector<int>& result);
-
-    optimal_tntp::RobotState home_configuration_;
+    // bool getPath(int fromId, int toId, std::vector<boost::graph_traits<
+	// boost::adjacency_list < boost::listS, boost::vecS, boost::undirectedS, 
+	// 	boost::no_property, boost::property < boost::edge_weight_t, unsigned long > > >::vertex_descriptor>& vPredecessor, 
+	// std::vector<int>& result);
 
     std::vector<TaskSpaceWaypoint>* TSpoints_;
 
     std::vector<ContinuousTrackingMotion>* CTM_;
 
     optimal_tntp::PRMstar* our_prmstarptr_;
-
-    bool with_all_solved_RMs_;
 
     boost::adjacency_list<boost::listS, boost::vecS, boost::undirectedS, boost::no_property, 
         boost::property<boost::edge_weight_t, double> > ctm_rm_g_;

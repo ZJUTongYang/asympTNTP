@@ -15,4 +15,6 @@ std::vector<TaskSpaceWaypoint> case_study_1_matrix44(std::string file_name);
 
 std::vector<TaskSpaceWaypoint> input_data(std::string filename);
 
+std::vector<std::vector<double>> input_data_joint_space(std::string file_name);
+
 void output_data(std::string file_name, const std::vector<optimal_tntp::RobotState>& robot_state);

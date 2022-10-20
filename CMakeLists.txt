@@ -1,16 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
 project(tntp_implementation)
 
-find_package(PkgConfig)
-pkg_check_modules(YAMLCPP REQUIRED yaml-cpp>=0.6)
-
-find_package(yaml-cpp REQUIRED)
-
-if (NOT yaml-cpp_FOUND)
-    message(FATAL_ERROR "Could NOT find yaml-cpp")
-else ()
-    message(STATUS "***FOUND*** yaml-cpp in directory ${yaml-cpp_DIR}.")
-endif ()
 
 find_package(catkin REQUIRED COMPONENTS
   roscpp
@@ -64,7 +54,9 @@ add_executable(${PROJECT_NAME} src/main.cpp
     src/ur5e_controller.cpp
     src/input_data.cpp
     src/environmental_obstacles.cpp
-    src/prmstar.cpp)
+    src/prmstar.cpp
+    src/asymp_tntp_algorithm.cpp
+    src/ral22_min_reconfig_tntp.cpp)
 
 ## Add cmake target dependencies of the executable, enforces generating messages
 ## VERY VERY VERY HIGHLY unlikely to change

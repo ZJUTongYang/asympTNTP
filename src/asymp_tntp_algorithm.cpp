@@ -1,14 +1,6 @@
-#include "ur5_moveit_perception/optimal_tntp_algorithm.h"
-#include <angles/angles.h>
+#include "asymp_tntp_algorithm.h"
 
-#include "ur5_moveit_perception/definitions.h"
-
-
-#include <boost/graph/dijkstra_shortest_paths.hpp>
-
-
-namespace optimal_tntp_algorithm
-{
+namespace optimal_tntp_algorithm{
 
 void defineStates(std::vector<TaskSpaceWaypoint>& TSpoints, double epsilon_cont, 
     std::vector<ContinuousTrackingMotion>& CTM)
@@ -180,33 +172,70 @@ void defineStates(std::vector<TaskSpaceWaypoint>& TSpoints, double epsilon_cont,
 	}
 }
 
-void OptimalTNTPSolver::addRMMotion(int source_color, int target_color, const std::vector<optimal_tntp::RobotState>& result_temp)
+
+OptimalTNTPSolver::OptimalTNTPSolver(std::vector<TaskSpaceWaypoint>* TSpoints, 
+        std::vector<ContinuousTrackingMotion>* CTM, 
+        optimal_tntp::PRMstar* our_prmstar)
 {
-	//// We record the motion into storage
-	// We find the edge
-	int loc = -1;
-	for(unsigned int i = 0; i < rm_count_; ++i)
+
+    // At the beginning, the manipulator must be in the home configuration
+    // With the manipulator moving, the current CTM might change, where then the passed CTMs need not be optimised again. 
+    // current_CTM_ = 0;
+
+	// home_configuration_.joint_ = {0.0, -M_PI/2, 0.0, -M_PI/2, 0.0, 0.0};
+
+    // We asssume that all task-space points and CTMs have been calculated
+    TSpoints_ = TSpoints;
+    CTM_ = CTM;
+
+	int last_task_space_point_index = TSpoints->size()-1;
+	for(unsigned int i = 0; i < CTM->size(); ++i)
 	{
-		if(all_RMs_[i].source_color_ == source_color && all_RMs_[i].target_color_ == target_color)
+		if((*CTM)[i].last_point_index_ == last_task_space_point_index)
 		{
-			loc = i;
-			break;
+			goal_CTMs_.push_back(i);
 		}
 	}
-	if(loc == -1)
-	{
-		std::cout << "Error: we should find an Edge. " << std::endl;
-	}
 
-	all_RMs_[loc].latest_construction_time_ = ros::WallTime::now();
+    our_prmstarptr_ = our_prmstar;
 
-	all_RMs_[loc].the_motion_.assign(result_temp.begin(), result_temp.end());
-	all_RMs_[loc].pathLength_ = optimal_tntp::pathLength(result_temp);
+    // with_all_solved_RMs_ = false;
+
+    rm_count_ = 0;
+
+    rm_cost_map_ = boost::get(boost::edge_weight, ctm_rm_g_);
+
+    initGraphStructure();
 
 }
 
+// void OptimalTNTPSolver::addRMMotion(int source_color, int target_color, const std::vector<optimal_tntp::RobotState>& result_temp)
+// {
+// 	//// We record the motion into storage
+// 	// We find the edge
+// 	int loc = -1;
+// 	for(unsigned int i = 0; i < rm_count_; ++i)
+// 	{
+// 		if(all_RMs_[i].source_color_ == source_color && all_RMs_[i].target_color_ == target_color)
+// 		{
+// 			loc = i;
+// 			break;
+// 		}
+// 	}
+// 	if(loc == -1)
+// 	{
+// 		std::cout << "Error: we should find an Edge. " << std::endl;
+// 	}
 
-void OptimalTNTPSolver::createInitialGuess()
+// 	all_RMs_[loc].latest_construction_time_ = ros::WallTime::now();
+
+// 	all_RMs_[loc].the_motion_.assign(result_temp.begin(), result_temp.end());
+// 	all_RMs_[loc].pathLength_ = optimal_tntp::pathLength(result_temp);
+
+// }
+
+
+void OptimalTNTPSolver::initGraphStructure()
 {
     // We construct the graph structure
     all_CTMs_.clear();
@@ -225,7 +254,6 @@ void OptimalTNTPSolver::createInitialGuess()
         for(unsigned int k = j+1; k < CTM_->size(); ++k)
         {
             // We check whether two CTMs are connectable
-            // Note that the spatial relationship is single-directional
             int f_j = (*CTM_)[j].first_point_index_;
             int l_j = (*CTM_)[j].last_point_index_;
             int f_k = (*CTM_)[k].first_point_index_;
@@ -246,11 +274,9 @@ void OptimalTNTPSolver::createInitialGuess()
                     rm_cost_map_[edEdge] = 10000;
 
                     std::cout << "OptimalTNTPSolver: a new edge from " << j << " to " << k << ", cost: " << rm_cost_map_[edEdge] << std::endl;
-                    all_RMs_[rm_count_] = ReconfigurationMotion();
-                    all_RMs_[rm_count_].source_color_ = j;
-                    all_RMs_[rm_count_].target_color_ = k;
+                    all_RMs_[rm_count_] = ReconfigurationMotion(j, k);
                     all_RMs_[rm_count_].source_last_configuration_index_ = (*CTM_)[j].last_point_index_;
-                    all_RMs_[rm_count_].pathLength_ = 1;
+                    all_RMs_[rm_count_].pathLength_ = 10000;
                     all_RMs_[rm_count_].the_motion_.clear();
 
                     ++rm_count_;
@@ -261,193 +287,77 @@ void OptimalTNTPSolver::createInitialGuess()
     }
 }
 
-void OptimalTNTPSolver::findInitialGuess(std::vector<optimal_tntp::RobotState>& resultant_tntp_motion_initial_guess, 
-	std::vector<int>& result_motion)
+
+// bool OptimalTNTPSolver::getPath(int fromId, int toId, std::vector<boost::graph_traits<
+// 	boost::adjacency_list < boost::listS, boost::vecS, boost::undirectedS, 
+// 		boost::no_property, boost::property < boost::edge_weight_t, unsigned long > > >::vertex_descriptor>& vPredecessor, 
+// 	std::vector<int>& result)
+// {
+// 	result.clear();
+// 	while (fromId != toId)
+// 	{
+//         std::cout << "toId = " << toId << ", "; 
+// 		result.push_back(toId);
+// 		if(toId > vPredecessor.size()-1 || toId == vPredecessor[toId])
+// 		{
+// 			std::cout << "OptimalTNTPSolver got a dead end. No path found." << std::endl;
+// 			return false;
+// 		}
+// 		toId = vPredecessor[toId];
+// 	}
+// 	result.push_back(toId);
+
+// 	std::reverse(result.begin(), result.end());
+
+// 	return true;
+// }
+
+
+void OptimalTNTPSolver::eliminateRMs(int prev_CTM_index, int next_CTM_index)
 {
-    std::vector<boost::graph_traits<
-        boost::adjacency_list < boost::listS, boost::vecS, boost::undirectedS, 
-            boost::no_property, boost::property < boost::edge_weight_t, double > > >::vertex_descriptor> vPredecessor(boost::num_vertices(ctm_rm_g_));
+	std::vector<bool> active_CTM;
+	active_CTM.resize(all_CTMs_.size(), false);
+	active_CTM[next_CTM_index] = true;
 
-    std::vector<double> vDistance(boost::num_vertices(ctm_rm_g_));            
+	std::vector<int> active_RM;
+	active_RM.resize(all_RMs_.size(), false);
 
-    boost::graph_traits<
-        boost::adjacency_list < boost::listS, boost::vecS, boost::undirectedS, 
-            boost::no_property, boost::property < boost::edge_weight_t, double > > >::vertex_descriptor s 
-        = boost::vertex(current_CTM_, ctm_rm_g_);
-
-    boost::property_map<
-        boost::adjacency_list < boost::listS, boost::vecS, boost::undirectedS, 
-            boost::no_property, boost::property < boost::edge_weight_t, double > >, 
-        boost::vertex_index_t>::type pmpIndexmap = boost::get(boost::vertex_index, ctm_rm_g_);
-    
-    boost::dijkstra_shortest_paths(ctm_rm_g_, s, &vPredecessor[0], &vDistance[0], rm_cost_map_, pmpIndexmap, 
-        std::less<double>(), boost::closed_plus<double>(),
-        std::numeric_limits<double>::max(), 0, boost::default_dijkstra_visitor());
-
-    // We only need to find one initial guess
-
-    std::cout << "We show possible goal CTMs: " << std::endl;
-	for(auto iter = goal_CTMs_.begin(); iter != goal_CTMs_.end(); ++iter)
+	bool stable = true;
+	while(1)
 	{
-		std::cout << *iter << " ";
-	}
-	std::cout << std::endl;
-
-
-	// std::vector<int> result_motion;
-	getOnePath(current_CTM_, goal_CTMs_, vPredecessor, result_motion);
-
-	std::cout << "OptimalTNTPSolver::findInitialGuess: We got one topological solution: " << std::endl;
-	for(auto iter = result_motion.begin(); iter != result_motion.end(); ++iter)
-	{
-		std::cout << *iter << " ";
-	}
-	std::cout << std::endl;
-
-	// We construct the initial joint-space motion
-	resultant_tntp_motion_initial_guess.clear();
-	resultant_tntp_motion_initial_guess.push_back(home_configuration_);
-
-	// We only find the reconfiguration motion from the home configuration unitl the finishment of the first tracking motion. 
-
-	std::vector<optimal_tntp::RobotState> the_first_reconfiguration_motion;
-
-	int index_temp = (*CTM_)[result_motion[1]].first_point_index_;
-	int color = (*CTM_)[result_motion[1]].color_;
-	std::vector<double> first_tracking_joint_angle = (*TSpoints_)[index_temp-1].getConfiguration(color);
-	our_prmstarptr_->findPath(home_configuration_, optimal_tntp::RobotState(first_tracking_joint_angle), the_first_reconfiguration_motion);
-
-	// We insert the first reconfiguration motion
-	resultant_tntp_motion_initial_guess.insert(resultant_tntp_motion_initial_guess.end(), 
-		the_first_reconfiguration_motion.begin()+1, the_first_reconfiguration_motion.end()-1);
-
-	// We append the "color" to the motion
-	for(auto iter = resultant_tntp_motion_initial_guess.begin(); iter != resultant_tntp_motion_initial_guess.end(); ++iter)
-	{
-		iter->joint_.emplace_back(-1.0);
-	}
-
-	// We insert the first tracking motion
-	int f1 = (*CTM_)[result_motion[1]].first_point_index_ - 1;
-	int l1 = (*CTM_)[result_motion[1]].last_point_index_ - 1;
-
-	std::cout << "color, f1, l1 = " << color << ", " << f1 << ", " << l1 << std::endl;
-
-	for(int i = f1; i <= l1; ++i)
-	{
-		resultant_tntp_motion_initial_guess.push_back((*TSpoints_)[i].getConfiguration(color));
-		resultant_tntp_motion_initial_guess.back().joint_.emplace_back(color);
-	}
-	
-
-	//// We record the motion into storage
-	// We find the edge
-	int loc = -1;
-	for(unsigned int i = 0; i < rm_count_; ++i)
-	{
-		if(all_RMs_[i].source_color_ == 0 && all_RMs_[i].target_color_ == color)
+		for(unsigned int i = 0; i < all_RMs_.size(); ++i)
 		{
-			loc = i;
+			int source = all_RMs_[i].source_color_;
+			int target = all_RMs_[i].target_color_;
+			if(active_CTM[source] == true && active_CTM[target] == false)
+			{
+				stable = false;
+				active_CTM[target] = true;
+			}
+		}
+		if(stable)
 			break;
-		}
-	}
-	if(loc == -1)
-	{
-		std::cout << "Error: we should find an Edge. " << std::endl;
 	}
 
-	all_RMs_[loc].source_last_configuration_index_ = 0;
-
-	all_RMs_[loc].latest_construction_time_ = ros::WallTime::now();
-
-	all_RMs_[loc].the_motion_.assign(the_first_reconfiguration_motion.begin(), the_first_reconfiguration_motion.end());
-	all_RMs_[loc].pathLength_ = optimal_tntp::pathLength(all_RMs_[loc].the_motion_);
-
-
-
-}
-
-void OptimalTNTPSolver::getOnePath(int fromId, std::vector<int> toIds, std::vector<boost::graph_traits<
-	boost::adjacency_list < boost::listS, boost::vecS, boost::undirectedS, 
-		boost::no_property, boost::property < boost::edge_weight_t, unsigned long > > >::vertex_descriptor>& vPredecessor, 
-	std::vector<int>& shortest_result)
-{
-	shortest_result.clear();
-
-	int min_length = 100000;
-	for(auto iter = toIds.begin(); iter != toIds.end(); ++iter)
+	for(unsigned int i = 0; i < all_RMs_.size(); ++i)
 	{
-		std::cout << "*iter = " << *iter << std::endl;
-		std::vector<int> result;
-		bool b = getPath(fromId, *iter, vPredecessor, result);
-		if(b && result.size() < min_length)
+		int source = all_RMs_[i].source_color_;
+		int target = all_RMs_[i].target_color_;
+		if(active_CTM[source] && active_CTM[target])
 		{
-			std::cout << "We find a better solution: toId = " << *iter << std::endl;
-			min_length = result.size();
-			shortest_result.assign(result.begin(), result.end());
+			// active_RM[i] = true;
+			all_RMs_[i].no_use_ = false;
+			all_RMs_[i].pathLength_ = 10000.0;
+			// Note that here we should not remove the paths. 
+			// Because we just won't optimise them, we may still print them
 		}
-		std::cout << "test 1" << std::endl;
-	}
-	std::cout << "outside for loop" << std::endl;
-}
-
-bool OptimalTNTPSolver::getPath(int fromId, int toId, std::vector<boost::graph_traits<
-	boost::adjacency_list < boost::listS, boost::vecS, boost::undirectedS, 
-		boost::no_property, boost::property < boost::edge_weight_t, unsigned long > > >::vertex_descriptor>& vPredecessor, 
-	std::vector<int>& result)
-{
-	result.clear();
-	while (fromId != toId)
-	{
-        std::cout << "toId = " << toId << ", "; 
-		result.push_back(toId);
-		if(toId > vPredecessor.size()-1 || toId == vPredecessor[toId])
+		else
 		{
-			std::cout << "OptimalTNTPSolver got a dead end. No path found." << std::endl;
-			return false;
-		}
-		toId = vPredecessor[toId];
-	}
-	result.push_back(toId);
-
-	std::reverse(result.begin(), result.end());
-
-	return true;
-}
-
-OptimalTNTPSolver::OptimalTNTPSolver(std::vector<TaskSpaceWaypoint>* TSpoints, 
-        std::vector<ContinuousTrackingMotion>* CTM, 
-        optimal_tntp::PRMstar* our_prmstar)
-{
-
-    // At the beginning, the manipulator must be in the home configuration
-    // With the manipulator moving, the current CTM might change, where then the passed CTMs need not be optimised again. 
-    current_CTM_ = 0;
-
-	home_configuration_.joint_ = {0.0, -M_PI/2, 0.0, -M_PI/2, 0.0, 0.0};
-
-    // We asssume that all task-space points and CTMs have been calculated
-    TSpoints_ = TSpoints;
-    CTM_ = CTM;
-
-	int last_task_space_point_index = TSpoints->size();
-	for(unsigned int i = 0; i < CTM->size(); ++i)
-	{
-		if((*CTM)[i].last_point_index_ == last_task_space_point_index)
-		{
-			goal_CTMs_.push_back(i);
+			all_RMs_[i].no_use_ = true;
 		}
 	}
 
-    our_prmstarptr_ = our_prmstar;
 
-    with_all_solved_RMs_ = false;
-
-    rm_count_ = 0;
-
-    rm_cost_map_ = boost::get(boost::edge_weight, ctm_rm_g_);
-
-    createInitialGuess();
 
 }
 
@@ -455,33 +365,40 @@ void OptimalTNTPSolver::updateAllRMs()
 {
 	for(unsigned int i = 0; i < rm_count_; ++i)
 	{
+		// We only update usable motions
+		if(all_RMs_[i].no_use_)
+		{
+			all_RMs_[i].pathLength_ = 10000.0;
+			continue;
+		}
+
 		int source_color = all_RMs_[i].source_color_;
 		int target_color = all_RMs_[i].target_color_;
 
-		std::vector<double> last_conf_previous_color;
-		std::vector<double> first_conf_next_color;
-
+		// TODO: Here we will change it to arbitrary pose after the code has been tested
 		int l_j = all_CTMs_[source_color].last_point_index_;
 		int s = l_j + 1;
 
 		std::cout << "source_color: " << source_color << ", target_color: " << target_color << std::endl;
 		std::cout << "l_j: " << l_j << ", s: " << s << std::endl;
 
-		if(source_color == 0)
-		{
-			// all_RMs_[i].pathLength_ = 10000.0;
-			// all_RMs_[i].the_motion_.clear();
-			// continue;
-			last_conf_previous_color = home_configuration_.joint_;
-			first_conf_next_color = (*TSpoints_)[s-1].getConfiguration(target_color);
-		}
-		else
-		{
+		std::vector<double> last_conf_previous_color;
+		std::vector<double> first_conf_next_color;
 
+		// if(source_color == 0)
+		// {
+		// 	// all_RMs_[i].pathLength_ = 10000.0;
+		// 	// all_RMs_[i].the_motion_.clear();
+		// 	// continue;
+		// 	last_conf_previous_color = home_configuration_.joint_;
+		// 	first_conf_next_color = (*TSpoints_)[s-1].getConfiguration(target_color);
+		// }
+		// else
+		// {
 
-			last_conf_previous_color = (*TSpoints_)[l_j-1].getConfiguration(source_color);
-			first_conf_next_color = (*TSpoints_)[s-1].getConfiguration(target_color);
-		}
+			last_conf_previous_color = (*TSpoints_)[l_j].getConfiguration(source_color);
+			first_conf_next_color = (*TSpoints_)[s].getConfiguration(target_color);
+		// }
 
 
 
@@ -489,7 +406,7 @@ void OptimalTNTPSolver::updateAllRMs()
 		our_prmstarptr_->findPath(optimal_tntp::RobotState(last_conf_previous_color), 
 			optimal_tntp::RobotState(first_conf_next_color), result_temp);
 
-		std::cout << "updateAllRMs: update RM from cost " << all_RMs_[i].pathLength_ << " to cost " << optimal_tntp::pathLength(result_temp) << std::endl;
+		std::cout << "updateAllRMs: update RM" << all_RMs_[i].source_color_ << "-->" << all_RMs_[i].target_color_ << " from cost " << all_RMs_[i].pathLength_ << " to cost " << optimal_tntp::pathLength(result_temp) << std::endl;
 		std::cout << "We show the udpated motion here: " << std::endl;
 		for(auto iter = all_RMs_[i].the_motion_.begin(); iter != all_RMs_[i].the_motion_.end(); ++iter)
 		{
@@ -505,63 +422,83 @@ void OptimalTNTPSolver::updateAllRMs()
 
 
 		// We store the RM into the solver
-		addRMMotion(source_color, target_color, result_temp);
+		// addRMMotion(source_color, target_color, result_temp);
+		all_RMs_[i].latest_construction_time_ = ros::WallTime::now();
+
+		all_RMs_[i].the_motion_.assign(result_temp.begin(), result_temp.end());
+		all_RMs_[i].pathLength_ = optimal_tntp::pathLength(result_temp);
 
 	}
 }
 
-void OptimalTNTPSolver::reportSolutionInSpecificTopology(const std::vector<int>& topo, std::vector<optimal_tntp::RobotState>& path_in_specific_topology)
+void OptimalTNTPSolver::reportSolutionInSpecificTopology(const std::vector<int>& topo, 
+	std::vector<optimal_tntp::RobotState>& path_in_specific_topology, 
+	int last_TSpoint_index, int& first_CTM_end_index)
 {
+	// In this function, we should have guaranteed that, no colour can be skipped. 
+	// In other words, l_{i-1} + 1 < f_{i+1}, so colour i is a must. 
+
 	path_in_specific_topology.clear();
-	path_in_specific_topology.emplace_back(home_configuration_);
-	path_in_specific_topology.back().joint_.emplace_back(-1);
+	first_CTM_end_index = -1;
+
+	int rm_index;
+
+	for(int i = 1; i < topo.size(); ++i)
+	{
+		// We locate the index of RM
+		for(rm_index = 0; rm_index < rm_count_; ++rm_index)
+		{
+			if(all_RMs_[rm_index].source_color_ == topo[i-1] && all_RMs_[rm_index].target_color_ == topo[i])
+				break;
+		}
+
+
+		// We find the part of CTM that the manipulator should traverse
+		int current_CTM_start_index = last_TSpoint_index+1;
+		// int current_CTM_end_index = (*CTM_)[topo[i-1]].last_point_index_;
+		int current_CTM_end_index = all_RMs_[rm_index].source_last_configuration_index_;
+
+
+		int j = current_CTM_start_index;
+		while(j <= current_CTM_end_index)
+		{
+			path_in_specific_topology.emplace_back( (*TSpoints_)[j].getConfiguration(topo[i-1]) );
+			path_in_specific_topology.back().joint_.emplace_back(topo[i-1]);
+			++j;
+		}
+
+		// We find the RM from CTM[topo[i-1]] to CTM[topo[i]]
+		std::vector<optimal_tntp::RobotState> current_RM = all_RMs_[rm_index].the_motion_;
+		for(auto iter = current_RM.begin(); iter != current_RM.end(); ++iter)
+		{
+			iter->joint_.emplace_back(-1);
+		}
+
+		path_in_specific_topology.insert(path_in_specific_topology.end(), current_RM.begin()+1, current_RM.end()-1);
+
+		last_TSpoint_index = current_CTM_end_index;
+
+		if(first_CTM_end_index == -1)
+		{
+			first_CTM_end_index = current_CTM_end_index;
+		}
+	}	
+
+	// We insert the last CTM
+	int j = all_RMs_[rm_index].source_last_configuration_index_+1;
+	while(j < TSpoints_->size())
+	{
+		path_in_specific_topology.emplace_back( (*TSpoints_)[j].getConfiguration(topo.back()) );
+		path_in_specific_topology.back().joint_.emplace_back(topo.back());
+		++j;
+	}
 
 	std::cout << "The solver is asked to report the current optimal solution in topology:";
 	for(auto iter = topo.begin(); iter != topo.end(); ++iter)
 	{
 		std::cout << *iter << " ";
 	}
-	std::cout << std::endl;
-
-	for(unsigned int i = 0; i < topo.size()-1; ++i)
-	{
-		// std::cout << "i = " << i << std::endl;
-		int source_color = topo[i];
-		int target_color = topo[i+1];
-		// We find the edge
-		bool correct_rm_found = false;
-		for(unsigned int j = 0; j < all_RMs_.size(); ++j)
-		{
-			if(all_RMs_[j].source_color_ == source_color && all_RMs_[j].target_color_ == target_color)
-			{
-				std::cout << "We find RM " << j << " that connects " << source_color << " and " << target_color << std::endl;
-				correct_rm_found = true;
-				for(int k = 1; k < all_RMs_[j].the_motion_.size()-1; ++k)
-				{
-					path_in_specific_topology.emplace_back(all_RMs_[j].the_motion_[k]);
-					path_in_specific_topology.back().joint_.emplace_back(-1);
-				}
-				break;
-			}
-		}
-		if(!correct_rm_found)
-		{
-			std::cout << "ERROR, we should find some element" << std::endl;
-		}
-
-		int l_j = (*CTM_)[source_color].last_point_index_;
-		int s = l_j + 1;
-
-		std::cout << "l_j = " << l_j << ", s = " << s << ", (*CTM_)[target_color].last_point_index_-1 = " << (*CTM_)[target_color].last_point_index_-1 << std::endl;
-
-		for(int j = s-1; j <= (*CTM_)[target_color].last_point_index_-1; ++j)
-		{
-			// std::cout << j << std::endl;
-			path_in_specific_topology.emplace_back((*TSpoints_)[j].getConfiguration(target_color));
-			path_in_specific_topology.back().joint_.emplace_back(target_color);
-		}
-
-	}// For each topo
+	std::cout << "with last TSpoint index " << last_TSpoint_index  << std::endl;
 
 	std::cout << "We cout them all: " << std::endl;
 	for(auto iter = path_in_specific_topology.begin(); iter != path_in_specific_topology.end(); ++iter)

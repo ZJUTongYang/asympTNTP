@@ -9,6 +9,8 @@
 #include "prmstar.h"
 
 struct ReconfigurationMotion{
+    bool no_use_;
+
     int source_color_;
     int target_color_;
     int source_last_configuration_index_;
@@ -17,12 +19,28 @@ struct ReconfigurationMotion{
 
     std::vector<optimal_tntp::RobotState> the_motion_;
     double pathLength_;
+
+    ReconfigurationMotion()
+    {
+        
+    }
+
+    ReconfigurationMotion(int source_color, int target_color)
+    {
+        source_color_ = source_color;
+        target_color_ = target_color;
+        no_use_ = false;
+    }
 };
 
 struct ContinuousTrackingMotion{
     int color_;
     int first_point_index_;
     int last_point_index_; 
+
+    // // Used in binary form. 
+    // unsigned long parents_;
+
 };
 
 struct TaskSpaceWaypoint{
@@ -36,7 +54,10 @@ struct TaskSpaceWaypoint{
         return iks_[loc];
     }
 
-    TaskSpaceWaypoint(){}
+    TaskSpaceWaypoint(){
+        iks_.clear();
+        color_.clear();
+    }
 
     TaskSpaceWaypoint(const std::vector<double>& ee_pose){
         for(unsigned int i = 0; i < 16; ++i)

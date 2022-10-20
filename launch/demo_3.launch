@@ -1,0 +1,7 @@
+<launch>
+
+<node pkg="tntp_implementation" type="tntp_implementation" name="asympTNTP" output="screen">
+    <rosparam command="load" file="$(find tntp_implementation)/launch/demo.yaml"/>
+</node>
+
+</launch>

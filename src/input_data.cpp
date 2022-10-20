@@ -134,6 +134,29 @@ void output_data(std::string file_name, const std::vector<optimal_tntp::RobotSta
 	out.close();
 }
 
+std::vector<std::vector<double>> input_data_joint_space(std::string file_name)
+{
+    std::vector<std::vector<double>> result;
+    result.clear();
+
+    std::ifstream infile;
+    infile.open(file_name.data(), std::ios::in);
+    assert(infile.is_open());
+
+    while (infile){
+        std::string s;
+        std::getline(infile, s);
+        std::istringstream is(s);
+        std::vector<double> join_space;
+        join_space.resize(6);
+        is >> join_space.at(0) >> join_space.at(1) >> join_space.at(2) >> join_space.at(3) >> join_space.at(4) >> join_space.at(5);
+        // wrapToPi(join_space);
+        result.push_back(join_space);
+    }
+    result.pop_back();
+
+    return result;
+}
 
 
 

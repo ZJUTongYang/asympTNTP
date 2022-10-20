@@ -1,12 +1,15 @@
 #include "ur5e_controller.h"
+#include "prmstar.h"
 
-trajectory_msgs::JointTrajectoryPoint initialiseTrajectoryPoint(const std::vector<double> joint_space, double duration){
+trajectory_msgs::JointTrajectoryPoint initialiseTrajectoryPoint(const std::vector<double> joint_space, double duration)
+{
     trajectory_msgs::JointTrajectoryPoint points;
 
     points.positions.resize(6);
     points.velocities.resize(6);
     points.accelerations.resize(6);
-    for (unsigned int i = 0; i < 6; i++){
+    for (unsigned int i = 0; i < 6; i++)
+    {
         points.positions[i] = joint_space.at(i);
         points.velocities[i] = 0.0;
         points.accelerations[i] = 0.0;
@@ -17,39 +20,121 @@ trajectory_msgs::JointTrajectoryPoint initialiseTrajectoryPoint(const std::vecto
     return points;
 }
 
-void wrapToPi(std::vector<double> &joint_space){
-
-    for (unsigned int i=0; i<joint_space.size(); i++){
-        if (joint_space.at(i) > M_PI) joint_space.at(i) -= 2*M_PI;
-        else if (joint_space.at(i) < -M_PI) joint_space.at(i) += 2*M_PI;
+void wrapToPi(std::vector<double> &joint_space)
+{
+    for (unsigned int i = 0; i < joint_space.size(); i++)
+    {
+        if (joint_space.at(i) > M_PI)
+            joint_space.at(i) -= 2 * M_PI;
+        else if (joint_space.at(i) < -M_PI)
+            joint_space.at(i) += 2 * M_PI;
     }
 }
 
-std::vector<std::vector<double>> input_dataa(std::string file_name)
+std::vector<double> wrapToPiJointSpacee(std::vector<double> joint_space)
 {
-    std::vector<std::vector<double>> result;
-    result.clear();
+    std::vector<double> result;
+    result = joint_space;
 
-    std::ifstream infile;
-    infile.open(file_name.data(), std::ios::in);
-    assert(infile.is_open());
-
-    while (infile){
-        std::string s;
-        std::getline(infile, s);
-        std::istringstream is(s);
-        std::vector<double> join_space;
-        join_space.resize(6);
-        is >> join_space.at(0) >> join_space.at(1) >> join_space.at(2) >> join_space.at(3) >> join_space.at(4) >> join_space.at(5);
-        // wrapToPi(join_space);
-        result.push_back(join_space);
+    for (unsigned int i = 0; i < result.size(); i++)
+    {
+        if (result.at(i) >= M_PI)
+            result.at(i) -= 2 * M_PI;
+        else if (result.at(i) < -M_PI)
+            result.at(i) += 2 * M_PI;
     }
-    result.pop_back();
 
     return result;
 }
 
-Manipulator_Controller::Manipulator_Controller(){
+namespace controller
+{
+    double getExpectedExecutionTime6D(std::vector<optimal_tntp::RobotState>& latest_motion_segment, const double joint_space_6d_velocity)
+    {
+        return optimal_tntp::pathLength(latest_motion_segment) / joint_space_6d_velocity;
+    }
+
+    void linearInterpolateConfigurations(std::vector<std::vector<double>> &result)
+    {
+        // YT: note that here each configuration must have 6 elements, 
+        // no 5 joint-angles (because then it would be different from the expected task execution time), 
+        // and no [joint, color] pair
+
+        double step = 0.1;
+
+        unsigned int i = 0;
+        while (i < result.size() - 1)
+        {
+            std::vector<std::vector<double>> temp;
+            temp.clear();
+
+            double sum_temp = 0;
+
+            for (unsigned int j = 0; j < result.at(i).size(); j++)
+                sum_temp += pow(angles::normalize_angle(result.at(i + 1).at(j) - result.at(i).at(j)), 2);
+
+            double norm = sqrt(sum_temp);
+
+            if (norm > 0.5)
+            {
+                std::vector<double> d_angle;
+                d_angle.resize(6);
+
+                for (unsigned int j = 0; j < result.at(i).size(); j++)
+                    d_angle.at(j) = ((angles::normalize_angle(result.at(i + 1).at(j) - result.at(i).at(j))) / norm * step) + result.at(i).at(j);
+
+                for (unsigned int k = 0; k < i + 1; k++)
+                    temp.push_back(result.at(k));
+
+                temp.push_back(d_angle);
+
+                for (unsigned int k = i + 1; k < result.size(); k++)
+                    temp.push_back(result.at(k));
+
+                result = temp;
+            }
+            else
+                i++;
+        }
+
+        for (unsigned int i = 0; i < result.size(); i++)
+        {
+            result.at(i) = wrapToPiJointSpacee(result.at(i));
+        }
+    }
+
+    void linearInterpolateConfigurations(std::vector<optimal_tntp::RobotState>& result)
+    {
+        std::vector<std::vector<double>> result_temp;
+
+        result_temp.resize(result.size());
+
+        for(unsigned int i = 0; i < result.size(); ++i)
+        {
+            result_temp[i].resize(6);
+            for(unsigned int j = 0; j < 6; ++j)
+            {
+                result_temp[i][j] = result[i].joint_[j];   
+            }
+        }
+        linearInterpolateConfigurations(result_temp);
+
+        result.clear();
+        result.resize(result_temp.size());
+        for(unsigned int i = 0; i < result_temp.size(); ++i)
+        {
+            result[i].joint_.resize(6);
+            for(unsigned int j = 0; j < 6; ++j)
+            {
+                result[i].joint_[j] = result_temp[i][j];
+            }
+        }
+    }
+
+};
+
+Manipulator_Controller::Manipulator_Controller()
+{
     // client_ = new Client("/scaled_pos_joint_traj_controller/follow_joint_trajectory", true);
     client_ = new Client("/pos_joint_traj_controller/follow_joint_trajectory", true);
 
@@ -63,7 +148,8 @@ Manipulator_Controller::Manipulator_Controller(){
 
 Manipulator_Controller::~Manipulator_Controller() {}
 
-void Manipulator_Controller::trajectoryBetween2Points(std::vector<double> start_point, std::vector<double> end_point){
+void Manipulator_Controller::trajectoryBetween2Points(std::vector<double> start_point, std::vector<double> end_point)
+{
     //
     goal_.trajectory.header.stamp = ros::Time::now() + ros::Duration(1);
 
@@ -82,7 +168,8 @@ void Manipulator_Controller::trajectoryBetween2Points(std::vector<double> start_
 
     client_->sendGoal(goal_);
 
-    while (client_->getState() != actionlib::SimpleClientGoalState::SUCCEEDED && ros::ok()){
+    while (client_->getState() != actionlib::SimpleClientGoalState::SUCCEEDED && ros::ok())
+    {
         client_->waitForResult(ros::Duration(1));
 
         ROS_INFO("Current State: %s", client_->getState().toString().c_str());
@@ -91,10 +178,8 @@ void Manipulator_Controller::trajectoryBetween2Points(std::vector<double> start_
     ROS_INFO("Action ended!");
 }
 
-void Manipulator_Controller::trajectoryFromArray(std::vector<std::vector<double>> array){
-
-    array = input_dataa("/home/mintnguyen/Documents/NRMDTS_Implementation/tntp_implementation/motion.txt");
-
+void Manipulator_Controller::trajectoryFromArray(std::vector<std::vector<double>> array)
+{
     //
     goal_.trajectory.header.stamp = ros::Time::now() + ros::Duration(1);
 
@@ -108,20 +193,39 @@ void Manipulator_Controller::trajectoryFromArray(std::vector<std::vector<double>
     goal_.trajectory.joint_names[5] = "wrist_3_joint";
 
     goal_.trajectory.points.resize(array.size());
-    for (unsigned int i = 0; i < array.size(); i++){
+    for (unsigned int i = 0; i < array.size(); i++)
+    {
         // wrapToPi(array.at(i));
         double time;
-        time = 4+(i*0.05);
+        time = 4 + (i * 1);
         goal_.trajectory.points.at(i) = initialiseTrajectoryPoint(array.at(i), time);
     }
 
     client_->sendGoal(goal_);
 
-    while (client_->getState() != actionlib::SimpleClientGoalState::SUCCEEDED && ros::ok())    {
-        client_->waitForResult(ros::Duration(1));
+    // while (client_->getState() != actionlib::SimpleClientGoalState::SUCCEEDED && ros::ok())
+    // {
+    //     client_->waitForResult(ros::Duration(1));
 
-        ROS_INFO("Current State: %s", client_->getState().toString().c_str());
-        sleep(2);
+    //     ROS_INFO("Current State: %s", client_->getState().toString().c_str());
+    //     sleep(2);
+    // }
+    // ROS_INFO("Action ended!");
+}
+
+void Manipulator_Controller::trajectoryFromArray(std::vector<optimal_tntp::RobotState> array)
+{
+    std::vector<std::vector<double> > array_temp;
+    array_temp.resize(array.size());
+
+    for(unsigned int i = 0; i < array.size(); ++i)
+    {
+        array_temp[i].resize(6);
+        for(unsigned int j = 0; j < 6; ++j)
+        {
+            array_temp[i][j] = array[i].joint_[j];
+        }
     }
-    ROS_INFO("Action ended!");
+
+    trajectoryFromArray(array_temp);
 }
