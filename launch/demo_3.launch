@@ -1,0 +1,7 @@
+<launch>
+
+<node pkg="asympTNTP" type="asympTNTP" name="asympTNTP" output="screen">
+    <rosparam command="load" file="$(find asympTNTP)/launch/demo.yaml"/>
+</node>
+
+</launch>
